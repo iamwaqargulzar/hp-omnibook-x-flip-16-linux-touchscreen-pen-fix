@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+"""hp-touch-irq-fix: work around the HP OmniBook X Flip 16 touchscreen IRQ routing bug.
+
+HP's ACPI power resource PTPL._ON clears the IO-APIC routing bit of the touchscreen
+interrupt pad. Linux runs _ON at boot, so the ELAN2514 interrupt fires ~630 times a
+second and the pen runs at ~25 Hz. This tool builds a corrected copy of *your own*
+firmware SSDT (one argument changed) and loads it at boot through the kernel's ACPI
+table upgrade mechanism. It never ships or downloads HP's tables.
+
+Commands:  check | install | verify | uninstall | guard
+"""
+import glob
+import hashlib
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+
+STATE = "/var/lib/hp-touch-irq-fix"
+CPIO = f"{STATE}/acpi-override.cpio"
+AML_DIR = f"{STATE}/aml"
+IT_HOOK = "/etc/initramfs-tools/hooks/hp-touch-irq-fix"
+DRACUT_CONF = "/etc/dracut.conf.d/hp-touch-irq-fix.conf"
+MKINITCPIO_DIR = "/etc/initcpio/acpi_override"
+GUARD_UNIT = "/etc/systemd/system/hp-touch-irq-fix-guard.service"
+TABLES = "/sys/firmware/acpi/tables"
+
+OLD = b"\\._SB_SGRATPI2TPIP"   # \_SB.SGRA (TPI2, TPIP)  -> routing := T0IP (0 = off)
+NEW = b"\\._SB_SGRATPI2TPLS"   # \_SB.SGRA (TPI2, TPLS)  -> routing := 1 (PTPL only exists if TPLS == 1)
+TPLS_GUARD = b"\x93TPLS\x01"   # LEqual (TPLS, One)
+
+IT_HOOK_BODY = """#!/bin/sh
+# Installed by hp-touch-irq-fix. Adds the corrected ACPI table to the early initramfs,
+# but only while the BIOS is the one the table was built from.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0;; esac
+. /usr/share/initramfs-tools/hook-functions
+S=/var/lib/hp-touch-irq-fix
+[ -r "$S/acpi-override.cpio" ] && [ -r "$S/bios" ] || exit 0
+if [ "$(cat /sys/class/dmi/id/bios_version) $(cat /sys/class/dmi/id/bios_date)" != "$(cat "$S/bios")" ]; then
+	echo "W: hp-touch-irq-fix: BIOS changed since the fix was built, not adding it." >&2
+	echo "W: hp-touch-irq-fix: run 'sudo hp-touch-irq-fix install' again." >&2
+	exit 0
+fi
+prepend_earlyinitramfs "$S/acpi-override.cpio"
+"""
+
+GUARD_BODY = """[Unit]
+Description=Disable hp-touch-irq-fix if the BIOS changed
+ConditionPathExists=/var/lib/hp-touch-irq-fix/bios
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hp-touch-irq-fix guard
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def die(msg):
+	sys.exit(f"error: {msg}")
+
+
+def read(path):
+	with open(path) as f:
+		return f.read().strip()
+
+
+def need_root():
+	if os.geteuid() != 0:
+		die("run with sudo")
+
+
+def bios_id():
+	return f"{read('/sys/class/dmi/id/bios_version')} {read('/sys/class/dmi/id/bios_date')}"
+
+
+def kernel_log():
+	out = subprocess.run(["journalctl", "-k", "-b", "--no-pager", "-o", "cat"],
+			     capture_output=True, text=True).stdout
+	if "ACPI: " not in out:
+		out = subprocess.run(["dmesg"], capture_output=True, text=True).stdout
+	return out
+
+
+def touchscreen():
+	"""Return (i2c name, ACPI scope segments, irq) of the ELAN touchscreen described as TPL1."""
+	for dev in glob.glob("/sys/bus/i2c/devices/i2c-ELAN*"):
+		try:
+			path = read(f"{dev}/firmware_node/path")
+		except OSError:
+			continue
+		segs = path.lstrip("\\").split(".")
+		if segs[-1] == "TPL1":
+			irq = None
+			for line in open("/proc/interrupts"):
+				if line.split() and line.split()[-1].startswith("ELAN"):
+					irq = int(line.split(":")[0])
+					break
+			return os.path.basename(dev), segs[:-1], irq
+	return None, None, None
+
+
+def irq_rate(irq, seconds=2.0):
+	def count():
+		for line in open("/proc/interrupts"):
+			if line.split(":")[0].strip() == str(irq):
+				return sum(int(x) for x in line.split()[1:] if x.isdigit())
+		return 0
+	import time
+	a = count()
+	time.sleep(seconds)
+	return (count() - a) / seconds
+
+
+def pad_state(irq):
+	"""Find the GPIO pad whose PADCFG1 interrupt-select equals irq; return (desc, padcfg0) or None."""
+	for pins in glob.glob("/sys/kernel/debug/pinctrl/*/pins"):
+		try:
+			for line in open(pins):
+				hx = re.findall(r"0x[0-9a-f]{8}", line)
+				if irq and len(hx) >= 2 and (int(hx[1], 16) & 0xFF) == irq:
+					return line.strip(), int(hx[0], 16)
+		except OSError:
+			continue
+	return None
+
+
+def scope_bytes(segs):
+	names = b"".join(s.encode().ljust(4, b"_") for s in segs)
+	if len(segs) == 1:
+		return b"\\" + names
+	if len(segs) == 2:
+		return b"\\." + names
+	return b"\\/" + bytes([len(segs)]) + names
+
+
+def listing(log):
+	"""Firmware table listing printed at boot, in XSDT order (physical addresses only)."""
+	rx = re.compile(r"ACPI: (SSDT) 0x([0-9A-F]{16}) ([0-9A-F]{6}) \(v(\d\d) (.{6}) (.{8}) ([0-9A-F]{8})")
+	out = []
+	for m in rx.finditer(log):
+		addr = int(m.group(2), 16)
+		if addr >> 48:
+			continue  # dynamically loaded tables have kernel virtual addresses
+		out.append({"addr": addr, "len": int(m.group(3), 16), "oem": m.group(5).encode(),
+			    "tid": m.group(6).encode(), "rev": int(m.group(7), 16)})
+	return out
+
+
+def header(b):
+	sig, length, _r, _c, oem, tid, orev = struct.unpack_from("<4sIBB6s8sI", b)
+	return {"len": length, "oem": oem, "tid": tid, "rev": orev}
+
+
+def fix_checksum(b):
+	b[9] = 0
+	b[9] = (-sum(b)) & 0xFF
+
+
+def preflight():
+	"""The kernel must allow initrd ACPI table upgrades."""
+	try:
+		lock = read("/sys/kernel/security/lockdown")
+	except OSError:
+		lock = "[none]"
+	if "[none]" not in lock:
+		die("kernel lockdown is active (usually because Secure Boot is on). The kernel ignores ACPI "
+		    "table overrides in lockdown, so this fix cannot work here. Use the kernel patch in "
+		    "patches/ instead, or disable Secure Boot.")
+	cfg = f"/boot/config-{os.uname().release}"
+	if os.path.exists(cfg) and "CONFIG_ACPI_TABLE_UPGRADE=y" not in open(cfg).read():
+		die("this kernel was built without CONFIG_ACPI_TABLE_UPGRADE")
+
+
+def plan(log):
+	"""Work out which firmware SSDT entries to override and with what."""
+	preflight()
+	if "Table Upgrade: override" in log:
+		die("an ACPI table override is active on this boot; boot without it first "
+		    "(run 'uninstall', reboot, then 'install')")
+	name, segs, _irq = touchscreen()
+	if not segs:
+		die("no ELAN touchscreen described as ...TPL1 found; this machine is not supported")
+	sb = scope_bytes(segs)
+
+	loaded = []
+	for f in sorted(glob.glob(f"{TABLES}/SSDT*"), key=lambda p: int(re.sub(r"\D", "", os.path.basename(p)) or 0)):
+		loaded.append(open(f, "rb").read())
+	entries = listing(log)
+	if not entries:
+		die("could not read the firmware table listing from the kernel log of this boot")
+
+	# Map every XSDT SSDT entry to content. Entries missing from sysfs were skipped by
+	# ACPICA as byte-identical duplicates of an earlier table.
+	ptr, dup_of = 0, {}
+	for i, e in enumerate(entries):
+		if ptr < len(loaded):
+			h = header(loaded[ptr])
+			if (h["len"], h["rev"], h["oem"], h["tid"]) == (e["len"], e["rev"], e["oem"], e["tid"]):
+				e["content"] = loaded[ptr]
+				ptr += 1
+				continue
+		prev = [j for j in range(i) if (entries[j]["len"], entries[j]["rev"], entries[j]["oem"], entries[j]["tid"])
+			== (e["len"], e["rev"], e["oem"], e["tid"]) and "content" in entries[j]]
+		if not prev:
+			die(f"cannot match firmware table entry {i + 1} to a loaded table")
+		dup_of[i] = prev[0]
+		e["content"] = entries[prev[0]]["content"]
+	if ptr != len(loaded):
+		die("firmware table listing and loaded tables do not line up")
+
+	# Find the table with the faulty PTPL._ON inside the touchscreen's controller scope.
+	target, pos = None, None
+	for i, e in enumerate(entries):
+		if i in dup_of:
+			continue
+		b = e["content"]
+		hits = [k for k in range(len(b)) if b.startswith(OLD, k)]
+		for h in hits:
+			sc = b.rfind(sb, 0, h)
+			# the nearest controller scope before the call must be the touchscreen's
+			if sc < 0 or sb[:-4] in b[sc + len(sb):h]:
+				continue
+			seg = b[sc:h]
+			if b"PTPL" in seg and b"_ON_" in seg and TPLS_GUARD in seg:
+				if target is not None:
+					die("faulty call found more than once; refusing to guess")
+				target, pos = i, h
+	if target is None:
+		die("the faulty PTPL._ON call was not found in this firmware (already fixed by HP, or a different design)")
+
+	oem, tid = entries[target]["oem"], entries[target]["tid"]
+	rel = [i for i, e in enumerate(entries) if (e["oem"], e["tid"]) == (oem, tid)]
+	last = rel.index(target)
+	changed = True
+	while changed:  # also cover later duplicates of anything we replace
+		changed = False
+		for i in rel[: last + 1]:
+			for j, src in dup_of.items():
+				if (src == i or dup_of.get(i) == src) and j in rel and rel.index(j) > last:
+					last, changed = rel.index(j), True
+
+	out = []
+	for n, i in enumerate(rel[: last + 1], 1):
+		e = entries[i]
+		if i in dup_of:
+			b = bytearray(e["content"][:36])
+			struct.pack_into("<I", b, 4, 36)       # empty placeholder; content is loaded once already
+		else:
+			b = bytearray(e["content"])
+			if i == target:
+				b[pos:pos + len(OLD)] = NEW
+		struct.pack_into("<I", b, 24, e["rev"] + 1)
+		fix_checksum(b)
+		out.append((f"{n:02d}-ssdt.aml", bytes(b)))
+	return out, name, segs, target + 1
+
+
+def cpio(files):
+	def entry(path, data, mode):
+		nb = path.encode() + b"\0"
+		hdr = "070701" + "".join(f"{v:08X}" for v in (0, mode, 0, 0, 1, 0, len(data), 0, 0, 0, 0, len(nb), 0))
+		blob = hdr.encode() + nb
+		blob += b"\0" * (-len(blob) % 4)
+		return blob + data + b"\0" * (-len(data) % 4)
+	blob = b""
+	for d in ("kernel", "kernel/firmware", "kernel/firmware/acpi"):
+		blob += entry(d, b"", 0o040755)
+	for name, data in files:
+		blob += entry(f"kernel/firmware/acpi/{name}", data, 0o100644)
+	blob += entry("TRAILER!!!", b"", 0)
+	return blob + b"\0" * (-len(blob) % 512)
+
+
+def regenerate():
+	if shutil.which("update-initramfs"):
+		subprocess.run(["update-initramfs", "-u", "-k", "all"], check=True)
+		return "initramfs-tools"
+	if shutil.which("dracut"):
+		subprocess.run(["dracut", "--force", "--regenerate-all"], check=True)
+		return "dracut"
+	if shutil.which("mkinitcpio"):
+		subprocess.run(["mkinitcpio", "-P"], check=True)
+		return "mkinitcpio"
+	die("no supported initramfs generator found (initramfs-tools, dracut, mkinitcpio)")
+
+
+def cmd_check():
+	name, segs, irq = touchscreen()
+	print(f"model   : {read('/sys/class/dmi/id/product_name')} (board {read('/sys/class/dmi/id/board_name')})")
+	print(f"bios    : {bios_id()}")
+	if not segs:
+		print("touch   : no ELAN touchscreen at ...TPL1 found -> not affected / not supported")
+		return
+	print(f"touch   : {name} at \\{'.'.join(segs)}.TPL1, IRQ {irq}")
+	if irq is not None:
+		r = irq_rate(irq)
+		print(f"idle IRQ: {r:.0f}/s (keep hands off the screen; ~600/s = affected, ~0 = fine)")
+	ps = pad_state(irq) if os.geteuid() == 0 and irq is not None else None
+	if ps:
+		print(f"pad     : {ps[0]}")
+		print(f"routing : GPIROUTIOXAPIC = {(ps[1] >> 20) & 1} (0 = bug present, 1 = fine)")
+	elif os.geteuid() != 0:
+		print("pad     : run with sudo to read the interrupt pad state")
+	active = "Table Upgrade: override" in kernel_log()
+	print(f"fix     : {'ACTIVE on this boot' if active else 'not active on this boot'}")
+
+
+def cmd_install():
+	need_root()
+	files, name, segs, t = plan(kernel_log())
+	os.makedirs(AML_DIR, exist_ok=True)
+	for f in glob.glob(f"{AML_DIR}/*.aml"):
+		os.remove(f)
+	for fn, data in files:
+		with open(f"{AML_DIR}/{fn}", "wb") as f:
+			f.write(data)
+	with open(CPIO, "wb") as f:
+		f.write(cpio(files))
+	with open(f"{STATE}/bios", "w") as f:
+		f.write(bios_id() + "\n")
+	with open(f"{STATE}/state.json", "w") as f:
+		json.dump({"touchscreen": name, "scope": segs, "target_entry": t, "tables": len(files),
+			   "sha256": [hashlib.sha256(d).hexdigest() for _, d in files]}, f, indent=1)
+	print(f"built {len(files)} override tables (fix is in firmware SSDT entry {t})")
+
+	if shutil.which("update-initramfs"):
+		with open(IT_HOOK, "w") as f:
+			f.write(IT_HOOK_BODY)
+		os.chmod(IT_HOOK, 0o755)
+	elif shutil.which("dracut"):
+		os.makedirs(os.path.dirname(DRACUT_CONF), exist_ok=True)
+		with open(DRACUT_CONF, "w") as f:
+			f.write(f'acpi_override="yes"\nacpi_table_dir="{AML_DIR}"\n')
+		print("NOTE: dracut support is untested. Please report results.")
+	elif shutil.which("mkinitcpio"):
+		os.makedirs(MKINITCPIO_DIR, exist_ok=True)
+		for fn, data in files:
+			with open(f"{MKINITCPIO_DIR}/{fn}", "wb") as f:
+				f.write(data)
+		print("NOTE: mkinitcpio support is untested. Add 'acpi_override' to HOOKS in")
+		print("      /etc/mkinitcpio.conf (after 'base'), then run: sudo mkinitcpio -P")
+	shutil.copy(os.path.abspath(sys.argv[0]), "/usr/local/sbin/hp-touch-irq-fix")
+	os.chmod("/usr/local/sbin/hp-touch-irq-fix", 0o755)
+	with open(GUARD_UNIT, "w") as f:
+		f.write(GUARD_BODY)
+	subprocess.run(["systemctl", "daemon-reload"])
+	subprocess.run(["systemctl", "enable", "hp-touch-irq-fix-guard.service"])
+	if shutil.which("update-initramfs") or shutil.which("dracut"):
+		print(f"regenerated with {regenerate()}")
+	print("Done. Reboot, then run: sudo hp-touch-irq-fix verify")
+
+
+def cmd_verify():
+	need_root()
+	log = kernel_log()
+	n = log.count("Table Upgrade: override")
+	st = json.load(open(f"{STATE}/state.json")) if os.path.exists(f"{STATE}/state.json") else {}
+	ok = True
+	print(f"overrides applied : {n} (expected {st.get('tables', '?')})")
+	ok &= n == st.get("tables", -1)
+	_name, _segs, irq = touchscreen()
+	ps = pad_state(irq) if irq is not None else None
+	if ps:
+		r = (ps[1] >> 20) & 1
+		print(f"routing bit       : {r} (want 1)")
+		ok &= r == 1
+	if irq is not None:
+		rate = irq_rate(irq, 3)
+		print(f"idle IRQ rate     : {rate:.0f}/s (want ~0; hands off the screen)")
+		ok &= rate < 50
+	dup = "AE_ALREADY_EXISTS" in log
+	print(f"duplicate objects : {'yes (report this)' if dup else 'none'}")
+	print("RESULT: PASS" if ok and not dup else "RESULT: FAIL")
+
+
+def cmd_uninstall():
+	need_root()
+	for p in (IT_HOOK, DRACUT_CONF, GUARD_UNIT):
+		if os.path.exists(p):
+			os.remove(p)
+	shutil.rmtree(MKINITCPIO_DIR, ignore_errors=True)
+	subprocess.run(["systemctl", "disable", "hp-touch-irq-fix-guard.service"], capture_output=True)
+	shutil.rmtree(STATE, ignore_errors=True)
+	print(f"regenerated with {regenerate()}")
+	print("Removed. Reboot to go back to the stock firmware tables.")
+
+
+def cmd_guard():
+	"""Boot-time check: if the BIOS changed, drop the fix before it can load stale tables again."""
+	if not os.path.exists(f"{STATE}/bios") or read(f"{STATE}/bios") == bios_id():
+		return
+	print("hp-touch-irq-fix: BIOS changed; removing the table override (rerun install on this BIOS)")
+	cmd_uninstall()
+
+
+if __name__ == "__main__":
+	cmds = {"check": cmd_check, "install": cmd_install, "verify": cmd_verify,
+		"uninstall": cmd_uninstall, "guard": cmd_guard}
+	if len(sys.argv) != 2 or sys.argv[1] not in cmds:
+		sys.exit(__doc__)
+	cmds[sys.argv[1]]()
