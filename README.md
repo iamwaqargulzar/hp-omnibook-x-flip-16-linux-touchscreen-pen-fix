@@ -99,7 +99,7 @@ applies on HP boards 8DA0/8DA1 with an ELAN2514 touchscreen.
 
 **Status: tested on hardware.** Built into Linux 7.2.8 (with Pop!_OS's kernel patches) on board 8DA1, BIOS F.20: the ELAN
 interrupt stays at 0/s while idle after boot and after s2idle suspend/resume, and pen, touch and palm rejection work. It passes
-`checkpatch.pl` and applies to Linux 7.2.8. Not yet posted upstream. See
+`checkpatch.pl` and applies to Linux 7.2.8. Posted to the HID maintainers on 2026-09-30: [v1 on lore](https://patch.msgid.link/20260930-b4-elan2514-irq-route-v1-1-44671bf01d05@gmail.com). See
 [docs/upstream.md](docs/upstream.md) for how it will be submitted.
 
 ## What is actually wrong
@@ -169,7 +169,7 @@ scope, and refuses otherwise. Please open an issue with your `check` output eith
 
 ## Upstream status
 
-- Linux kernel: RFC patch in [`patches/`](patches/), notes in [docs/upstream.md](docs/upstream.md).
+- Linux kernel: [patch v1 posted 2026-09-30](https://patch.msgid.link/20260930-b4-elan2514-irq-route-v1-1-44671bf01d05@gmail.com) to linux-input, linux-acpi and stable; notes in [docs/upstream.md](docs/upstream.md).
 - Ubuntu: [Launchpad bug 2142384](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384) (pen report rate).
 - Kernel Bugzilla: [bug 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854).
 - linux-i2c list: [ELAN2514 IRQ flood thread, May 2026](https://ratatoskr.run/linux-i2c/2026/05/9013594/t).

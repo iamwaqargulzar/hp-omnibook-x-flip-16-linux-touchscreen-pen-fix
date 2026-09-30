@@ -8,7 +8,7 @@ File: [`patches/0001-HID-i2c-hid-acpi-restore-touchscreen-IRQ-routing-on-HP-Omni
   `\GPLI` (the touchscreen's GPIO pad number) and calls the firmware's `\_SB.SGRA(pad, 1)` to set `GPIROUTIOXAPIC` again. The
   core calls `power_up` at probe and at resume, before the HID reset, which is right after ACPI has run the faulty `PTPL._ON`.
   Failures are logged and never fail probe or resume.
-- **Status:** tested, not yet posted.
+- **Status:** v1 posted 2026-09-30: https://patch.msgid.link/20260930-b4-elan2514-irq-route-v1-1-44671bf01d05@gmail.com
   - Builds with `W=1` with no warnings; `checkpatch.pl` reports 0 errors and 0 warnings.
   - Applies to `drivers/hid/i2c-hid/i2c-hid-acpi.c` in Linux 7.2.8.
   - Tested on board 8DA1, BIOS F.20, Linux 7.2.8: IRQ 0/s idle after boot and after s2idle resume; pen and touch normal.
