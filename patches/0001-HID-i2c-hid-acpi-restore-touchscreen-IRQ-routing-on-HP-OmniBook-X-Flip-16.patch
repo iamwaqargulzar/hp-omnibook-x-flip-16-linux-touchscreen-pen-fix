@@ -21,9 +21,10 @@ on), after which the level-triggered IRQ never deasserts:
 
 Re-enable the routing through the firmware's own \_SB.SGRA helper from
 the power_up hook, which runs at probe and on resume before the HID
-reset. Measured with the equivalent ACPI table fix on board 8DA1, BIOS
-F.20: idle interrupts drop from ~630/s to 0, PADCFG0 changes from
-0x80000102 to 0x80100102, and pen and touch behave as on Windows.
+reset. Tested on board 8DA1, BIOS F.20, Linux 7.2.8: idle interrupts drop
+from ~630/s to 0 after boot and after s2idle resume, and pen and touch
+behave as on Windows. The equivalent ACPI table fix shows PADCFG0 changing
+from 0x80000102 to 0x80100102.
 
 Link: https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384
 Link: https://github.com/testyfishy/hp-omnibook-flip16-touchscreen-fix
@@ -39,8 +40,8 @@ diff --git a/drivers/hid/i2c-hid/i2c-hid-acpi.c b/drivers/hid/i2c-hid/i2c-hid-ac
  #include <linux/i2c.h>
  #include <linux/kernel.h>
  #include <linux/module.h>
-@@ -83,6 +84,60 @@
- 	i2c_hid_acpi_get_descriptor(ihid_acpi);
+@@ -55,6 +56,60 @@
+ 	i2c_hid_acpi_get_descriptor(ihid_acpi->adev);
  }
  
 +/*
@@ -100,13 +101,13 @@ diff --git a/drivers/hid/i2c-hid/i2c-hid-acpi.c b/drivers/hid/i2c-hid/i2c-hid-ac
  static void i2c_hid_acpi_shutdown_tail(struct i2chid_ops *ops)
  {
  	struct i2c_hid_acpi *ihid_acpi = container_of(ops, struct i2c_hid_acpi, ops);
-@@ -104,6 +159,9 @@
- 	ihid_acpi->adev = ACPI_COMPANION(dev);
+@@ -85,6 +140,9 @@
+ 	ihid_acpi->adev = adev;
  	ihid_acpi->ops.shutdown_tail = i2c_hid_acpi_shutdown_tail;
  	ihid_acpi->ops.restore_sequence = i2c_hid_acpi_restore_sequence;
 +	if (acpi_dev_hid_uid_match(ihid_acpi->adev, "ELAN2514", NULL) &&
 +	    dmi_check_system(i2c_hid_acpi_irq_route_dmi))
 +		ihid_acpi->ops.power_up = i2c_hid_acpi_restore_irq_route;
  
- 	ret = i2c_hid_acpi_get_descriptor(ihid_acpi);
- 	if (ret < 0)
+ 	acpi_device_fix_up_power(adev);
+ 
