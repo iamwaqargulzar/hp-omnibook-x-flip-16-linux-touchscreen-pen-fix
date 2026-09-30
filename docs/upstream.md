@@ -8,16 +8,14 @@ File: [`patches/0001-HID-i2c-hid-acpi-restore-touchscreen-IRQ-routing-on-HP-Omni
   `\GPLI` (the touchscreen's GPIO pad number) and calls the firmware's `\_SB.SGRA(pad, 1)` to set `GPIROUTIOXAPIC` again. The
   core calls `power_up` at probe and at resume, before the HID reset, which is right after ACPI has run the faulty `PTPL._ON`.
   Failures are logged and never fail probe or resume.
-- **Status:** RFC.
-  - Builds against Linux 7.2.2 with `W=1`, with no warnings.
-  - `checkpatch.pl` reports 0 errors and 0 warnings.
-  - Applies to `drivers/hid/i2c-hid/i2c-hid-acpi.c` as of 7.2.
-  - **Not yet run on hardware.** The same register change, made from the firmware side with the ACPI table fix, has been.
+- **Status:** tested, not yet posted.
+  - Builds with `W=1` with no warnings; `checkpatch.pl` reports 0 errors and 0 warnings.
+  - Applies to `drivers/hid/i2c-hid/i2c-hid-acpi.c` in Linux 7.2.8.
+  - Tested on board 8DA1, BIOS F.20, Linux 7.2.8: IRQ 0/s idle after boot and after s2idle resume; pen and touch normal.
 
 ### Before sending
 
-1. Test it on hardware: probe, then suspend/resume a few times, then check `/proc/interrupts` stays quiet and the
-   pen and touch work.
+1. Done: probe and s2idle resume tested on 8DA1. More resume cycles and a cold boot or two don't hurt.
 2. Put your real name and email in the `From:` line and add `Signed-off-by:` (required by the
    [Developer's Certificate of Origin](https://docs.kernel.org/process/submitting-patches.html#sign-your-work-the-developer-s-certificate-of-origin)).
 3. Add `Tested-by:` lines from other owners who tested it, with their permission.

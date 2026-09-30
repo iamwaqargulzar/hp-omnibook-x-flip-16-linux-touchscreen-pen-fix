@@ -84,7 +84,7 @@ sudo reboot
 
 | Distribution | initramfs | Status |
 |---|---|---|
-| Pop!_OS 24.04 | initramfs-tools | corrected tables tested on hardware; installer being tested |
+| Pop!_OS 24.04 | initramfs-tools | corrected tables tested on hardware; `install` itself not yet run |
 | Ubuntu 24.04 / 26.04 | initramfs-tools | same code path as Pop!_OS, expected to work (Secure Boot must be off) |
 | Fedora | dracut | supported, untested |
 | Arch Linux, CachyOS, EndeavourOS | mkinitcpio | supported, untested: add `acpi_override` to `HOOKS` in `/etc/mkinitcpio.conf`, then `sudo mkinitcpio -P` |
@@ -97,8 +97,9 @@ Reports from other distributions are welcome. Please open an issue with the outp
 `i2c-hid-acpi` driver call the firmware's own `\_SB.SGRA(\GPLI, 1)` helper after every power-on, before the HID reset. It only
 applies on HP boards 8DA0/8DA1 with an ELAN2514 touchscreen.
 
-**Status: RFC, compile-tested only.** It builds cleanly against Linux 7.2.2 with `W=1` and passes `checkpatch.pl`. It hasn't
-been run on hardware yet; the ACPI table fix above, which does the same thing from the firmware side, has. See
+**Status: tested on hardware.** Built into Linux 7.2.8 (with Pop!_OS's kernel patches) on board 8DA1, BIOS F.20: the ELAN
+interrupt stays at 0/s while idle after boot and after s2idle suspend/resume, and pen, touch and palm rejection work. It passes
+`checkpatch.pl` and applies to Linux 7.2.8. Not yet posted upstream. See
 [docs/upstream.md](docs/upstream.md) for how it will be submitted.
 
 ## What is actually wrong
