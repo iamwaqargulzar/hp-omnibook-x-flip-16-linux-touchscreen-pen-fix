@@ -48,6 +48,7 @@ Report it through HP support with a reference to this repository, the board ID (
 
 ## Distribution bugs
 
-- Ubuntu: [Launchpad 2142384](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384). Add the finding that the slow pen
-  report rate on board 8DA1 is fixed by restoring the IRQ routing.
+- Ubuntu: [Launchpad 2168946](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2168946) tracks this bug and carries the patch; ask for the backport there once the patch is
+  merged upstream. The older [2142384](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384) is marked Fix Released for
+  an out-of-tree workaround.
 - Kernel Bugzilla: [220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854).

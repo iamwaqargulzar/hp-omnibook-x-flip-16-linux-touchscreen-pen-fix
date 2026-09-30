@@ -170,7 +170,8 @@ scope, and refuses otherwise. Please open an issue with your `check` output eith
 ## Upstream status
 
 - Linux kernel: [patch v1 posted 2026-09-30](https://patch.msgid.link/20260930-b4-elan2514-irq-route-v1-1-44671bf01d05@gmail.com) to linux-input, linux-acpi and stable; notes in [docs/upstream.md](docs/upstream.md).
-- Ubuntu: [Launchpad bug 2142384](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384) (pen report rate).
+- Ubuntu: [Launchpad bug 2168946](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2168946) (this firmware bug, with the patch attached); older report
+  [2142384](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384) (pen report rate).
 - Kernel Bugzilla: [bug 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854).
 - linux-i2c list: [ELAN2514 IRQ flood thread, May 2026](https://ratatoskr.run/linux-i2c/2026/05/9013594/t).
 - HP: the real fix is a BIOS update that makes `PTPL._ON` write `TPIP ^ One`.
