@@ -15,7 +15,7 @@ pen and touch behave the way they do on Windows. It also contains a kernel patch
 | Pen | ~25 Hz, bursty, skips | smooth, Windows-like |
 | Touch | stutters, sometimes becomes a pointer | normal, and suppressed while the pen is in use |
 
-Tested on an HP OmniBook X Flip Laptop 16-as0xxx, board 8DA1, BIOS F.20, Pop!_OS 24.04 with Linux 7.2.2.
+Tested on an HP OmniBook X Flip Laptop 16-as0xxx, board 8DA1, BIOS F.20, Pop!_OS 24.04 with Linux 7.2.2 (ACPI table fix) and 7.2.8 (kernel patch).
 
 ## Symptoms
 
