@@ -125,8 +125,14 @@ def pad_state(irq):
 		try:
 			for line in open(pins):
 				hx = re.findall(r"0x[0-9a-f]{8}", line)
-				if irq and len(hx) >= 2 and (int(hx[1], 16) & 0xFF) == irq:
-					return line.strip(), int(hx[0], 16)
+				if not irq or len(hx) < 2 or (int(hx[1], 16) & 0xFF) != irq:
+					continue
+				cfg0 = int(hx[0], 16)
+				# Several pads can carry the same INTSEL value. The touchscreen pad is a
+				# GPIO-mode input: PMODE (bits 12:10) = 0, RX enabled (bit 9 = 0),
+				# TX disabled (bit 8 = 1).
+				if (cfg0 >> 10) & 7 == 0 and not cfg0 & (1 << 9) and cfg0 & (1 << 8):
+					return line.strip(), cfg0
 		except OSError:
 			continue
 	return None
@@ -280,15 +286,19 @@ def cpio(files):
 
 
 def regenerate():
-	if shutil.which("update-initramfs"):
-		subprocess.run(["update-initramfs", "-u", "-k", "all"], check=True)
-		return "initramfs-tools"
-	if shutil.which("dracut"):
-		subprocess.run(["dracut", "--force", "--regenerate-all"], check=True)
-		return "dracut"
-	if shutil.which("mkinitcpio"):
-		subprocess.run(["mkinitcpio", "-P"], check=True)
-		return "mkinitcpio"
+	# Only the running kernel: regenerating every installed kernel fails on systems
+	# with stale kernel entries. Future kernels pick the fix up through the hook/config.
+	kver = os.uname().release
+	for tool, cmd in (("update-initramfs", ["update-initramfs", "-u", "-k", kver]),
+			  ("dracut", ["dracut", "--force", "--kver", kver]),
+			  ("mkinitcpio", ["mkinitcpio", "-P"])):
+		if shutil.which(tool):
+			try:
+				subprocess.run(cmd, check=True)
+			except subprocess.CalledProcessError:
+				die(f"'{' '.join(cmd)}' failed (see its output above). The fix files are installed; "
+				    "fix the initramfs error and run that command again.")
+			return tool
 	die("no supported initramfs generator found (initramfs-tools, dracut, mkinitcpio)")
 
 
