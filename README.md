@@ -86,7 +86,7 @@ sudo reboot
 |---|---|---|
 | Pop!_OS 24.04 | initramfs-tools | corrected tables tested on hardware; `install` itself not yet run |
 | Ubuntu 24.04 / 26.04 | initramfs-tools | same code path as Pop!_OS, expected to work (Secure Boot must be off) |
-| Fedora | dracut | supported, untested |
+| Fedora | dracut | **works**: confirmed by another owner (board 8DA1, BIOS F.10, `04F3:43EF`) in [kernel bugzilla 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854) |
 | Arch Linux, CachyOS, EndeavourOS | mkinitcpio | supported, untested: add `acpi_override` to `HOOKS` in `/etc/mkinitcpio.conf`, then `sudo mkinitcpio -P` |
 
 Reports from other distributions are welcome. Please open an issue with the output of `check` and `verify`.
