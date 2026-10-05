@@ -74,8 +74,11 @@ sudo reboot
 
 **Requirements and limits:**
 
-- **Secure Boot must be off.** With Secure Boot on, the kernel runs in lockdown mode and ignores ACPI table overrides. The tool
-  checks this and refuses to install. Use Option B instead.
+- **Kernel lockdown must be off.** In lockdown mode the kernel ignores ACPI table overrides. Ubuntu and Fedora turn lockdown on
+  whenever Secure Boot is on; Arch does not, so Secure Boot itself can stay on there. Check with
+  `cat /sys/kernel/security/lockdown` (`[none]` = fine). The tool checks this and refuses to install. Otherwise use Option B, or
+  the DKMS module from [testyfishy/hp-omnibook-flip16-touchscreen-fix](https://github.com/testyfishy/hp-omnibook-flip16-touchscreen-fix),
+  which works with Secure Boot via MOK signing.
 - **The fix is tied to your BIOS version.** Before updating the BIOS, run `uninstall`. As a safety net, a small boot-time service
   removes the fix automatically when it sees a different BIOS, and the initramfs hook refuses to add tables built for another BIOS.
   After the update, reboot once and run `install` again.
@@ -87,7 +90,7 @@ sudo reboot
 | Pop!_OS 24.04 | initramfs-tools | corrected tables tested on hardware; `install` itself not yet run |
 | Ubuntu 24.04 / 26.04 | initramfs-tools | same code path as Pop!_OS, expected to work (Secure Boot must be off) |
 | Fedora | dracut | **works**: confirmed by another owner (board 8DA1, BIOS F.10, `04F3:43EF`) in [kernel bugzilla 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854) |
-| Arch Linux, CachyOS, EndeavourOS | mkinitcpio | supported, untested: add `acpi_override` to `HOOKS` in `/etc/mkinitcpio.conf`, then `sudo mkinitcpio -P` |
+| Arch Linux, CachyOS, EndeavourOS | mkinitcpio | **works**: confirmed on an OmniBook 7 Flip 16 (board 8DA0, BIOS F.08). Add `acpi_override` to `HOOKS` in `/etc/mkinitcpio.conf`, then `sudo mkinitcpio -P` |
 
 Reports from other distributions are welcome. Please open an issue with the output of `check` and `verify`.
 
@@ -162,10 +165,20 @@ pen runs at full rate without any frame-salvaging patch.
 The fixed `_ON` runs on every resume, so the interrupt stays connected after sleep.
 
 ### Other HP models
-The HP OmniBook X Flip 14, OmniBook 7 Flip 16 and other OmniBook X Flip 16 variants show the same symptoms in bug reports, but
-nobody has confirmed yet that their firmware has the same faulty `_ON`. Run `check`: if the idle IRQ rate is in the hundreds and
-routing is `0`, you probably have the same bug. `install` only acts when it finds the exact faulty call in the touchscreen's
-scope, and refuses otherwise. Please open an issue with your `check` output either way.
+Confirmed with the ACPI table fix (same faulty `_ON`, `verify` passes):
+
+| Model | Board | BIOS | Digitizer | Distribution |
+|---|---|---|---|---|
+| OmniBook X Flip 16-as0xxx | 8DA1 | F.20 | `04F3:43F0` | Pop!_OS 24.04 |
+| OmniBook X Flip 16-as0xxx | 8DA1 | F.10 | `04F3:43EF` | Fedora 44 |
+| OmniBook 7 Flip 16-au0773cl | 8DA0 | F.08 | `04F3:43EF` | Arch Linux |
+
+Also affected (same IRQ storm reported, fix not yet tried): OmniBook X Flip 16-as0001TU, board 8DA1, BIOS F.10, `04F3:43F5`.
+
+The OmniBook X Flip 14 (`04F3:4428`/`442A`/`442E`) shows similar symptoms in bug reports, but nobody has confirmed that its
+firmware has the same faulty `_ON`. Run `check`: if the idle IRQ rate is in the hundreds and routing is `0`, you probably have
+the same bug. `install` only acts when it finds the exact faulty call in the touchscreen's scope, and refuses otherwise. Please
+open an issue with your `check` output either way.
 
 ## Upstream status
 
