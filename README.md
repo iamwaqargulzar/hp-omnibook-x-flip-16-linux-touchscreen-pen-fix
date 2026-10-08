@@ -98,11 +98,11 @@ Reports from other distributions are welcome. Please open an issue with the outp
 
 [`patches/0001-HID-i2c-hid-acpi-restore-touchscreen-IRQ-routing-on-HP-OmniBook-X-Flip-16.patch`](patches/) makes the
 `i2c-hid-acpi` driver call the firmware's own `\_SB.SGRA(\GPLI, 1)` helper after every power-on, before the HID reset. It only
-applies on HP boards 8DA0/8DA1 with an ELAN2514 touchscreen.
+applies on HP boards 8D9F/8DA0/8DA1 with an ELAN2514 touchscreen.
 
 **Status: tested on hardware.** Built into Linux 7.2.8 (with Pop!_OS's kernel patches) on board 8DA1, BIOS F.20: the ELAN
 interrupt stays at 0/s while idle after boot and after s2idle suspend/resume, and pen, touch and palm rejection work. It passes
-`checkpatch.pl` and applies to Linux 7.2.8. Posted to the HID maintainers on 2026-09-30: [v1 on lore](https://patch.msgid.link/20260930-b4-elan2514-irq-route-v1-1-44671bf01d05@gmail.com). See
+`checkpatch.pl` and applies to Linux 7.2.8. Posted to the HID maintainers: [v1](https://patch.msgid.link/20260930-b4-elan2514-irq-route-v1-1-44671bf01d05@gmail.com) (2026-09-30), [v2](https://patch.msgid.link/20261008-b4-elan2514-irq-route-v2-1-432d95eb7348@gmail.com) (2026-10-08, adds the Flip 14 board 8D9F). See
 [docs/upstream.md](docs/upstream.md) for how it will be submitted.
 
 ## What is actually wrong
@@ -184,7 +184,7 @@ open an issue with your `check` output either way.
 
 ## Upstream status
 
-- Linux kernel: [patch v1 posted 2026-09-30](https://patch.msgid.link/20260930-b4-elan2514-irq-route-v1-1-44671bf01d05@gmail.com) to linux-input, linux-acpi and stable; notes in [docs/upstream.md](docs/upstream.md).
+- Linux kernel: [patch v2 posted 2026-10-08](https://patch.msgid.link/20261008-b4-elan2514-irq-route-v2-1-432d95eb7348@gmail.com) (boards 8D9F, 8DA0, 8DA1) to linux-input, linux-acpi and stable; notes in [docs/upstream.md](docs/upstream.md).
 - Ubuntu: [Launchpad bug 2168946](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2168946) (this firmware bug, with the patch attached); older report
   [2142384](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384) (pen report rate).
 - Kernel Bugzilla: [bug 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854).
