@@ -285,21 +285,34 @@ def cpio(files):
 	return blob + b"\0" * (-len(blob) % 512)
 
 
+def generator():
+	# Decide by the generator's config dir, not just the binary: CachyOS ships an
+	# update-initramfs shim that just runs "mkinitcpio -P" without initramfs-tools.
+	if shutil.which("update-initramfs") and os.path.isdir("/etc/initramfs-tools"):
+		return "update-initramfs"
+	if shutil.which("dracut"):
+		return "dracut"
+	if shutil.which("mkinitcpio"):
+		return "mkinitcpio"
+	return None
+
+
 def regenerate():
 	# Only the running kernel: regenerating every installed kernel fails on systems
 	# with stale kernel entries. Future kernels pick the fix up through the hook/config.
 	kver = os.uname().release
-	for tool, cmd in (("update-initramfs", ["update-initramfs", "-u", "-k", kver]),
-			  ("dracut", ["dracut", "--force", "--kver", kver]),
-			  ("mkinitcpio", ["mkinitcpio", "-P"])):
-		if shutil.which(tool):
-			try:
-				subprocess.run(cmd, check=True)
-			except subprocess.CalledProcessError:
-				die(f"'{' '.join(cmd)}' failed (see its output above). The fix files are installed; "
-				    "fix the initramfs error and run that command again.")
-			return tool
-	die("no supported initramfs generator found (initramfs-tools, dracut, mkinitcpio)")
+	tool = generator()
+	cmd = {"update-initramfs": ["update-initramfs", "-u", "-k", kver],
+	       "dracut": ["dracut", "--force", "--kver", kver],
+	       "mkinitcpio": ["mkinitcpio", "-P"]}.get(tool)
+	if not cmd:
+		die("no supported initramfs generator found (initramfs-tools, dracut, mkinitcpio)")
+	try:
+		subprocess.run(cmd, check=True)
+	except subprocess.CalledProcessError:
+		die(f"'{' '.join(cmd)}' failed (see its output above). The fix files are installed; "
+		    "fix the initramfs error and run that command again.")
+	return tool
 
 
 def cmd_check():
@@ -341,29 +354,30 @@ def cmd_install():
 			   "sha256": [hashlib.sha256(d).hexdigest() for _, d in files]}, f, indent=1)
 	print(f"built {len(files)} override tables (fix is in firmware SSDT entry {t})")
 
-	if shutil.which("update-initramfs"):
+	gen = generator()
+	if gen == "update-initramfs":
 		with open(IT_HOOK, "w") as f:
 			f.write(IT_HOOK_BODY)
 		os.chmod(IT_HOOK, 0o755)
-	elif shutil.which("dracut"):
+	elif gen == "dracut":
 		os.makedirs(os.path.dirname(DRACUT_CONF), exist_ok=True)
 		with open(DRACUT_CONF, "w") as f:
 			f.write(f'acpi_override="yes"\nacpi_table_dir="{AML_DIR}"\n')
-		print("NOTE: dracut support is untested. Please report results.")
-	elif shutil.which("mkinitcpio"):
+	elif gen == "mkinitcpio":
 		os.makedirs(MKINITCPIO_DIR, exist_ok=True)
 		for fn, data in files:
 			with open(f"{MKINITCPIO_DIR}/{fn}", "wb") as f:
 				f.write(data)
-		print("NOTE: mkinitcpio support is untested. Add 'acpi_override' to HOOKS in")
-		print("      /etc/mkinitcpio.conf (after 'base'), then run: sudo mkinitcpio -P")
+		print("NEXT STEPS (mkinitcpio does not pick the tables up on its own):")
+		print("  1. Add 'acpi_override' to HOOKS in /etc/mkinitcpio.conf (after 'base')")
+		print("  2. Run: sudo mkinitcpio -P")
 	shutil.copy(os.path.abspath(sys.argv[0]), "/usr/local/sbin/hp-touch-irq-fix")
 	os.chmod("/usr/local/sbin/hp-touch-irq-fix", 0o755)
 	with open(GUARD_UNIT, "w") as f:
 		f.write(GUARD_BODY)
 	subprocess.run(["systemctl", "daemon-reload"])
 	subprocess.run(["systemctl", "enable", "hp-touch-irq-fix-guard.service"])
-	if shutil.which("update-initramfs") or shutil.which("dracut"):
+	if gen in ("update-initramfs", "dracut"):
 		print(f"regenerated with {regenerate()}")
 	print("Done. Reboot, then run: sudo hp-touch-irq-fix verify")
 

@@ -1,6 +1,6 @@
-# HP OmniBook X Flip 16: Linux touchscreen and pen fix (ELAN2514)
+# HP OmniBook X Flip 16 / Flip 14: Linux touchscreen and pen fix (ELAN2514)
 
-If you run Linux on an **HP OmniBook X Flip 16** (board 8DA0/8DA1, Intel Lunar Lake) and the **stylus is laggy, the pen only
+If you run Linux on an **HP OmniBook X Flip 16, OmniBook X Flip 14 or OmniBook 7 Flip 16** (boards 8DA1, 8D9F, 8DA0; Intel Lunar Lake) and the **stylus is laggy, the pen only
 updates at about 25 Hz, touch stutters, or your finger turns into a mouse pointer**, the cause is a bug in HP's ACPI firmware.
 It isn't the ELAN digitizer, and it isn't the i2c-hid driver. Firmware code that Windows never runs disconnects the
 touchscreen interrupt from the interrupt controller, so Linux polls the controller blindly about 630 times a second.
@@ -90,7 +90,7 @@ sudo reboot
 | Pop!_OS 24.04 | initramfs-tools | corrected tables tested on hardware; `install` itself not yet run |
 | Ubuntu 24.04 / 26.04 | initramfs-tools | same code path as Pop!_OS, expected to work (Secure Boot must be off) |
 | Fedora | dracut | **works**: confirmed by another owner (board 8DA1, BIOS F.10, `04F3:43EF`) in [kernel bugzilla 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854) |
-| Arch Linux, CachyOS, EndeavourOS | mkinitcpio | **works**: confirmed on an OmniBook 7 Flip 16 (board 8DA0, BIOS F.08). Add `acpi_override` to `HOOKS` in `/etc/mkinitcpio.conf`, then `sudo mkinitcpio -P` |
+| Arch Linux, CachyOS, EndeavourOS | mkinitcpio | **works**: confirmed on Arch (OmniBook 7 Flip 16, board 8DA0) and CachyOS (OmniBook X Flip 14, board 8D9F). Add `acpi_override` to `HOOKS` in `/etc/mkinitcpio.conf`, then `sudo mkinitcpio -P`; later kernel updates keep the tables |
 
 Reports from other distributions are welcome. Please open an issue with the output of `check` and `verify`.
 
@@ -172,12 +172,14 @@ Confirmed with the ACPI table fix (same faulty `_ON`, `verify` passes):
 | OmniBook X Flip 16-as0xxx | 8DA1 | F.20 | `04F3:43F0` | Pop!_OS 24.04 |
 | OmniBook X Flip 16-as0xxx | 8DA1 | F.10 | `04F3:43EF` | Fedora 44 |
 | OmniBook 7 Flip 16-au0773cl | 8DA0 | F.08 | `04F3:43EF` | Arch Linux |
+| OmniBook X Flip 14-fm0xxx | 8D9F | F.08 | `04F3:442A` | CachyOS |
 
-Also affected (same IRQ storm reported, fix not yet tried): OmniBook X Flip 16-as0001TU, board 8DA1, BIOS F.10, `04F3:43F5`.
+Also fixed with testyfishy's DKMS module (same IRQ storm): OmniBook X Flip 16-as0001TU (8DA1, F.10, `04F3:43F5`, Kubuntu) and
+OmniBook X 16-as0043dx (8DA1, F.20, `04F3:43F0`, Manjaro).
 
-The OmniBook X Flip 14 (`04F3:4428`/`442A`/`442E`) shows similar symptoms in bug reports, but nobody has confirmed that its
-firmware has the same faulty `_ON`. Run `check`: if the idle IRQ rate is in the hundreds and routing is `0`, you probably have
-the same bug. `install` only acts when it finds the exact faulty call in the touchscreen's scope, and refuses otherwise. Please
+The OmniBook X Flip 14 (board 8D9F) has the byte-identical faulty `_ON`, on the same pad (GPP_E_18). Other Flip 14 digitizers
+(`04F3:4428`/`442E`/`4430`) are likely the same. Run `check`: if the idle IRQ rate is in the hundreds and routing is `0`, you
+have the same bug. `install` only acts when it finds the exact faulty call in the touchscreen's scope, and refuses otherwise. Please
 open an issue with your `check` output either way.
 
 ## Upstream status
