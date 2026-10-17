@@ -184,7 +184,12 @@ open an issue with your `check` output either way.
 
 ## Upstream status
 
+Last checked: 2026-10-17.
+
 - Linux kernel: [patch v2 posted 2026-10-08](https://patch.msgid.link/20261008-b4-elan2514-irq-route-v2-1-432d95eb7348@gmail.com) (boards 8D9F, 8DA0, 8DA1) to linux-input, linux-acpi and stable; notes in [docs/upstream.md](docs/upstream.md).
+  Waiting for maintainer review. The automated review asked whether the fix is skipped on resume when the touchscreen is a
+  wakeup source; it is not one on these boards (no `_PRW`, no wake-capable interrupt, no `power/wakeup` in sysfs), so the fix
+  runs on every resume. Until it is merged, use the ACPI table fix above or a kernel with the patch applied.
 - Ubuntu: [Launchpad bug 2168946](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2168946) (this firmware bug, with the patch attached); older report
   [2142384](https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384) (pen report rate).
 - Kernel Bugzilla: [bug 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854).
