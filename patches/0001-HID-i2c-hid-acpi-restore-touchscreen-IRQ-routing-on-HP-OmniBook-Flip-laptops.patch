@@ -1,9 +1,12 @@
-From: Your Name <you@example.com>
-Subject: [RFC PATCH] HID: i2c-hid-acpi: restore touchscreen IRQ routing on HP OmniBook X Flip 16
+From 094ae7e591be0bd9108d005880228699237b4612 Mon Sep 17 00:00:00 2001
+From: Waqar Gulzar <iamwaqargulzar@gmail.com>
+Date: Wed, 30 Sep 2026 10:48:54 +0500
+Subject: [PATCH] HID: i2c-hid-acpi: restore touchscreen IRQ routing on HP
+ OmniBook Flip laptops
 
-On the HP OmniBook X Flip 16 (boards 8DA0 and 8DA1) the ELAN2514
-touchscreen interrupt is a GPIO pad (GPP_E_18) routed directly to the
-IO-APIC. The firmware's touchscreen power resource does
+On the HP OmniBook X Flip 16, OmniBook 7 Flip 16 and OmniBook X Flip 14
+the ELAN2514 touchscreen interrupt is a GPIO pad (GPP_E_18) routed
+directly to the IO-APIC. The firmware's touchscreen power resource does
 
     PTPL._ON:  \_SB.SGRA (TPI2, TPIP)        // TPIP = T0IP = 0
     PTPL._OFF: \_SB.SGRA (TPI2, TPIP ^ 1)
@@ -14,22 +17,38 @@ IO-APIC. Linux evaluates _ON at probe and on every D3->D0 transition
 (Windows apparently does not while _STA already reports the resource
 on), after which the level-triggered IRQ never deasserts:
 
-  - ~630 interrupts/s while idle, every read returns 0xffff
+  - ~630 interrupts/s while idle, nearly every read returns 0xffff
   - frames shifted by a leading 0xff, "incomplete report (67/7167)"
   - stylus reports arrive at ~25 Hz instead of the native ~268 Hz
-  - touch stalls and false stylus proximity ("finger becomes a pointer")
+  - touch stalls and false stylus proximity
 
 Re-enable the routing through the firmware's own \_SB.SGRA helper from
 the power_up hook, which runs at probe and on resume before the HID
-reset. Tested on board 8DA1, BIOS F.20, Linux 7.2.8: idle interrupts drop
-from ~630/s to 0 after boot and after s2idle resume, and pen and touch
-behave as on Windows. The equivalent ACPI table fix shows PADCFG0 changing
-from 0x80000102 to 0x80100102.
+reset.
 
+Tested with this patch on the OmniBook X Flip 16 (board 8DA1, BIOS
+F.20): idle interrupts drop from ~630/s to 0 after boot and after
+s2idle resume, and pen and touch behave as on Windows.
+
+The same faulty _ON, the same pad and the same ~630/s storm were
+confirmed by other owners on the OmniBook 7 Flip 16 (board 8DA0, BIOS
+F.08) and the OmniBook X Flip 14 (board 8D9F, BIOS F.08). On both,
+correcting the _ON value through an ACPI table override stops the storm
+(routing bit set, 0 interrupts/s idle, also after s2idle), which is the
+same correction this patch applies at runtime.
+
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=220854
 Link: https://bugs.launchpad.net/ubuntu/+source/linux/+bug/2142384
 Link: https://github.com/testyfishy/hp-omnibook-flip16-touchscreen-fix
+Link: https://github.com/iamwaqargulzar/hp-omnibook-x-flip-16-linux-touchscreen-pen-fix
+Cc: stable@vger.kernel.org
+Signed-off-by: Waqar Gulzar <iamwaqargulzar@gmail.com>
 ---
+ drivers/hid/i2c-hid/i2c-hid-acpi.c | 65 ++++++++++++++++++++++++++++++
+ 1 file changed, 65 insertions(+)
+
 diff --git a/drivers/hid/i2c-hid/i2c-hid-acpi.c b/drivers/hid/i2c-hid/i2c-hid-acpi.c
+index 9371db200..b307d9a3d 100644
 --- a/drivers/hid/i2c-hid/i2c-hid-acpi.c
 +++ b/drivers/hid/i2c-hid/i2c-hid-acpi.c
 @@ -21,6 +21,7 @@
@@ -40,12 +59,13 @@ diff --git a/drivers/hid/i2c-hid/i2c-hid-acpi.c b/drivers/hid/i2c-hid/i2c-hid-ac
  #include <linux/i2c.h>
  #include <linux/kernel.h>
  #include <linux/module.h>
-@@ -55,6 +56,60 @@
+@@ -55,6 +56,67 @@ static void i2c_hid_acpi_restore_sequence(struct i2chid_ops *ops)
  	i2c_hid_acpi_get_descriptor(ihid_acpi->adev);
  }
  
 +/*
-+ * HP OmniBook X Flip 16 (boards 8DA0/8DA1): the touchscreen power resource
++ * HP OmniBook X Flip 14 (board 8D9F), OmniBook 7 Flip 16 (8DA0) and
++ * OmniBook X Flip 16 (8DA1): the touchscreen power resource
 + * \_SB.PC00.I2C4.PTPL._ON writes the wrong value to the GPIROUTIOXAPIC bit
 + * of the touchscreen interrupt pad, disconnecting it from the IO-APIC. The
 + * level-triggered interrupt then never deasserts, the controller is read
@@ -56,6 +76,12 @@ diff --git a/drivers/hid/i2c-hid/i2c-hid-acpi.c b/drivers/hid/i2c-hid/i2c-hid-ac
 + * the HID reset.
 + */
 +static const struct dmi_system_id i2c_hid_acpi_irq_route_dmi[] = {
++	{
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
++			DMI_EXACT_MATCH(DMI_BOARD_NAME, "8D9F"),
++		},
++	},
 +	{
 +		.matches = {
 +			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
@@ -101,7 +127,7 @@ diff --git a/drivers/hid/i2c-hid/i2c-hid-acpi.c b/drivers/hid/i2c-hid/i2c-hid-ac
  static void i2c_hid_acpi_shutdown_tail(struct i2chid_ops *ops)
  {
  	struct i2c_hid_acpi *ihid_acpi = container_of(ops, struct i2c_hid_acpi, ops);
-@@ -85,6 +140,9 @@
+@@ -85,6 +147,9 @@ static int i2c_hid_acpi_probe(struct i2c_client *client)
  	ihid_acpi->adev = adev;
  	ihid_acpi->ops.shutdown_tail = i2c_hid_acpi_shutdown_tail;
  	ihid_acpi->ops.restore_sequence = i2c_hid_acpi_restore_sequence;
@@ -111,3 +137,6 @@ diff --git a/drivers/hid/i2c-hid/i2c-hid-acpi.c b/drivers/hid/i2c-hid/i2c-hid-ac
  
  	acpi_device_fix_up_power(adev);
  
+-- 
+2.43.0
+

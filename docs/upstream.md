@@ -2,7 +2,7 @@
 
 ## Kernel patch
 
-File: [`patches/0001-HID-i2c-hid-acpi-restore-touchscreen-IRQ-routing-on-HP-OmniBook-X-Flip-16.patch`](../patches/)
+File: [`patches/0001-HID-i2c-hid-acpi-restore-touchscreen-IRQ-routing-on-HP-OmniBook-Flip-laptops.patch`](../patches/) (v2 as posted)
 
 - **What it does:** on HP boards 8D9F/8DA0/8DA1 with an `ELAN2514` device, `i2c-hid-acpi` installs a `power_up` hook. The hook reads
   `\GPLI` (the touchscreen's GPIO pad number) and calls the firmware's `\_SB.SGRA(pad, 1)` to set `GPIROUTIOXAPIC` again. The
@@ -13,6 +13,10 @@ File: [`patches/0001-HID-i2c-hid-acpi-restore-touchscreen-IRQ-routing-on-HP-Omni
   - Builds with `W=1` with no warnings; `checkpatch.pl` reports 0 errors and 0 warnings.
   - Applies to `drivers/hid/i2c-hid/i2c-hid-acpi.c` in Linux 7.2.8.
   - Tested on board 8DA1, BIOS F.20, Linux 7.2.8: IRQ 0/s idle after boot and after s2idle resume; pen and touch normal.
+  - Tested by another owner on board 8D9F, BIOS F.08, Linux 7.2.9, with the ACPI table fix removed: IRQ 0/s idle after boot and
+    after s2idle resume; pen and touch normal. Two explicit `Tested-by` lines were given in
+    [bugzilla 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854) (comments 47 and 49), to add in the next revision or follow-up.
+  - Checked 2026-11-02: not in Linux 7.4-rc1 or HID `for-next`, and no maintainer reply yet.
 
 ### Before sending
 
