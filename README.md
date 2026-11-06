@@ -160,6 +160,17 @@ sudo ./tool/hp-touch-irq-fix install
 grep -q '^HOOKS=.*acpi_override' /etc/mkinitcpio.conf || sudo sed -i 's/^HOOKS=(base /HOOKS=(base acpi_override /' /etc/mkinitcpio.conf
 ```
 
+If you boot with a unified kernel image (UKI) and have no fallback entry, the next command overwrites your only boot entry, so
+keep a copy first. This lists your UKIs, if you have any:
+
+```bash
+ls /boot/EFI/Linux /efi/EFI/Linux 2>/dev/null
+```
+
+If it shows a `.efi` file, copy it to a second name in the same folder, for example
+`sudo cp /boot/EFI/Linux/arch-linux.efi /boot/EFI/Linux/arch-linux-backup.efi` (use the folder and name it showed). systemd-boot
+lists the copy automatically. Delete it once step 8 passes. If it shows nothing, skip this.
+
 ```bash
 grep '^HOOKS=' /etc/mkinitcpio.conf | grep -q acpi_override && sudo mkinitcpio -P || echo "acpi_override was not added: see Troubleshooting"
 ```
@@ -191,6 +202,25 @@ downloaded folder if you like: the fix doesn't need it any more.
 - **BIOS updates:** the fix is tied to your BIOS version. Before updating the BIOS, [remove the fix](#remove-the-fix). After the
   update, repeat steps 3 to 8. If you forget, a small service removes the fix by itself at the next boot, and the problem returns
   until you install it again.
+
+### Getting updates to the tool
+
+If you installed the fix before 2026-11-06, update the installed copy of the tool. Older copies have two bugs:
+- On laptops with an ELAN touchpad, `check` and `verify` could measure the touchpad instead of the touchscreen. So `check` could say
+  0/s on an affected laptop, and `verify` could pass when the fix wasn't working.
+- On Arch-based systems, the automatic removal after a BIOS update left `acpi_override` in your boot settings.
+
+This doesn't change the fix itself, so no reinstall or restart is needed:
+
+```bash
+cd ~/hp-omnibook-x-flip-16-linux-touchscreen-pen-fix && git pull
+```
+
+```bash
+sudo cp ~/hp-omnibook-x-flip-16-linux-touchscreen-pen-fix/tool/hp-touch-irq-fix /usr/local/sbin/hp-touch-irq-fix
+```
+
+If you deleted the folder, repeat step 3 first. Then run step 8 again.
 
 ### Remove the fix
 
@@ -308,7 +338,7 @@ downloaded or redistributed, and your kernel isn't modified.
 | Pop!_OS 24.04 | initramfs-tools | corrected tables tested on hardware; `install` itself not yet run |
 | Ubuntu 24.04 / 26.04 | initramfs-tools | same code path as Pop!_OS, expected to work (Secure Boot must be off) |
 | Fedora | dracut | **works**: confirmed by another owner (board 8DA1, BIOS F.10, `04F3:43EF`) in [kernel bugzilla 220854](https://bugzilla.kernel.org/show_bug.cgi?id=220854) |
-| Arch Linux, CachyOS, EndeavourOS | mkinitcpio | **works**: confirmed on Arch (OmniBook 7 Flip 16, board 8DA0) and on CachyOS and another mkinitcpio system (OmniBook X Flip 14, board 8D9F); later kernel updates keep the tables |
+| Arch Linux, CachyOS, EndeavourOS | mkinitcpio | **works**: confirmed on Arch (OmniBook 7 Flip 16, board 8DA0; OmniBook X Flip 14, board 8D9F, also with a UKI) and on CachyOS and another mkinitcpio system (board 8D9F); later kernel updates keep the tables |
 
 Reports from other distributions are welcome. Please open an issue with the output of `check` and `verify`.
 
@@ -394,12 +424,13 @@ Confirmed with the ACPI table fix (same faulty `_ON`, `verify` passes):
 | OmniBook 7 Flip 16-au0773cl | 8DA0 | F.08 | `04F3:43EF` | Arch Linux |
 | OmniBook X Flip 14-fm0xxx | 8D9F | F.08 | `04F3:442A` | CachyOS |
 | OmniBook X Flip 14-fm0xxx | 8D9F | F.20 | `04F3:4428` | mkinitcpio-based |
+| OmniBook X Flip 14-fm0xxx | 8D9F | F.10 | `04F3:442E` | Arch Linux (UKI, systemd-boot) |
 
 Also fixed with testyfishy's DKMS module (same IRQ storm): OmniBook X Flip 16-as0001TU (8DA1, F.10, `04F3:43F5`, Kubuntu) and
 OmniBook X 16-as0043dx (8DA1, F.20, `04F3:43F0`, Manjaro).
 
 The OmniBook X Flip 14 (board 8D9F) has the byte-identical faulty `_ON`, on the same pad (GPP_E_18). Other Flip 14 digitizers
-(`04F3:442E`/`4430`) are likely the same. Run `check`: if the idle IRQ rate is in the hundreds and routing is `0`, you
+(`04F3:4430`) are likely the same. Run `check`: if the idle IRQ rate is in the hundreds and routing is `0`, you
 have the same bug. `install` only acts when it finds the exact faulty call in the touchscreen's scope, and refuses otherwise. Please
 open an issue with your `check` output either way.
 

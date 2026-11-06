@@ -26,6 +26,7 @@ AML_DIR = f"{STATE}/aml"
 IT_HOOK = "/etc/initramfs-tools/hooks/hp-touch-irq-fix"
 DRACUT_CONF = "/etc/dracut.conf.d/hp-touch-irq-fix.conf"
 MKINITCPIO_DIR = "/etc/initcpio/acpi_override"
+MKINITCPIO_CONFS = ["/etc/mkinitcpio.conf"] + glob.glob("/etc/mkinitcpio.conf.d/*.conf")
 GUARD_UNIT = "/etc/systemd/system/hp-touch-irq-fix-guard.service"
 TABLES = "/sys/firmware/acpi/tables"
 
@@ -98,9 +99,12 @@ def touchscreen():
 			continue
 		segs = path.lstrip("\\").split(".")
 		if segs[-1] == "TPL1":
+			# Match this device exactly: an ELAN touchpad (e.g. ELAN012A:00) can
+			# have a lower IRQ number than the touchscreen.
+			wanted = os.path.basename(dev).removeprefix("i2c-")
 			irq = None
 			for line in open("/proc/interrupts"):
-				if line.split() and line.split()[-1].startswith("ELAN"):
+				if line.split() and line.split()[-1] == wanted:
 					irq = int(line.split(":")[0])
 					break
 			return os.path.basename(dev), segs[:-1], irq
@@ -315,6 +319,27 @@ def regenerate():
 	return tool
 
 
+def remove_mkinitcpio_tables():
+	"""Remove our tables; once none are left, also drop the acpi_override hook so
+	mkinitcpio doesn't fail with "No ACPI table override files found"."""
+	for f in glob.glob(f"{MKINITCPIO_DIR}/[0-9][0-9]-ssdt.aml"):
+		os.remove(f)
+	try:
+		os.rmdir(MKINITCPIO_DIR)
+	except OSError:
+		return  # missing, or still holds tables that aren't ours
+	for conf in MKINITCPIO_CONFS:
+		try:
+			text = open(conf).read()
+		except OSError:
+			continue
+		new = re.sub(r"^(\s*HOOKS=.*?)[ \t]+acpi_override\b", r"\1", text, flags=re.M)
+		if new != text:
+			with open(conf, "w") as f:
+				f.write(new)
+			print(f"removed the acpi_override hook from {conf}")
+
+
 def cmd_check():
 	name, segs, irq = touchscreen()
 	print(f"model   : {read('/sys/class/dmi/id/product_name')} (board {read('/sys/class/dmi/id/board_name')})")
@@ -371,7 +396,9 @@ def cmd_install():
 		print("NEXT STEPS (mkinitcpio does not pick the tables up on its own):")
 		print("  1. Add 'acpi_override' to HOOKS in /etc/mkinitcpio.conf (after 'base')")
 		print("  2. Run: sudo mkinitcpio -P")
-	shutil.copy(os.path.abspath(sys.argv[0]), "/usr/local/sbin/hp-touch-irq-fix")
+	src, dst = os.path.abspath(sys.argv[0]), "/usr/local/sbin/hp-touch-irq-fix"
+	if not (os.path.exists(dst) and os.path.samefile(src, dst)):  # reinstall from the installed copy
+		shutil.copy(src, dst)
 	os.chmod("/usr/local/sbin/hp-touch-irq-fix", 0o755)
 	with open(GUARD_UNIT, "w") as f:
 		f.write(GUARD_BODY)
@@ -410,7 +437,7 @@ def cmd_uninstall():
 	for p in (IT_HOOK, DRACUT_CONF, GUARD_UNIT):
 		if os.path.exists(p):
 			os.remove(p)
-	shutil.rmtree(MKINITCPIO_DIR, ignore_errors=True)
+	remove_mkinitcpio_tables()
 	subprocess.run(["systemctl", "disable", "hp-touch-irq-fix-guard.service"], capture_output=True)
 	shutil.rmtree(STATE, ignore_errors=True)
 	print(f"regenerated with {regenerate()}")
